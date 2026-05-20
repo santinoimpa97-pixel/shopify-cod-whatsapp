@@ -338,8 +338,8 @@ router.get('/orders', async (req, res) => {
     }
 
     if (search) {
-      query += ' AND (order_number LIKE ? OR customer_name LIKE ? OR customer_phone LIKE ?)'
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`)
+      query += ' AND (order_number LIKE ? OR LOWER(customer_name) LIKE ? OR customer_phone LIKE ?)'
+      params.push(`%${search}%`, `%${search.toLowerCase()}%`, `%${search}%`)
     }
 
     query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
@@ -357,8 +357,8 @@ router.get('/orders', async (req, res) => {
     }
 
     if (search) {
-      countQuery += ' AND (order_number LIKE ? OR customer_name LIKE ? OR customer_phone LIKE ?)'
-      countParams.push(`%${search}%`, `%${search}%`, `%${search}%`)
+      countQuery += ' AND (order_number LIKE ? OR LOWER(customer_name) LIKE ? OR customer_phone LIKE ?)'
+      countParams.push(`%${search}%`, `%${search.toLowerCase()}%`, `%${search}%`)
     }
 
     const countResult = await db.get(countQuery, countParams)
