@@ -80,8 +80,8 @@ router.post('/shopify/orders-create', verifyShopifyWebhook, async (req, res) => 
       // Save it as failed in DB
       const token = uuidv4()
       await db.run(
-        `INSERT INTO orders (id, shopify_order_id, order_number, customer_name, customer_phone, total_price, currency, payment_gateway, status, whatsapp_status, token)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO orders (id, shopify_order_id, order_number, customer_name, customer_phone, total_price, currency, payment_gateway, status, whatsapp_status, token, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           order.id.toString(),
           order.id.toString(),
@@ -93,7 +93,8 @@ router.post('/shopify/orders-create', verifyShopifyWebhook, async (req, res) => 
           gateways.join(', ') || gateway,
           'failed',
           'failed',
-          token
+          token,
+          order.created_at
         ]
       )
       return res.status(200).send('Logged with error: Phone missing')
@@ -109,8 +110,8 @@ router.post('/shopify/orders-create', verifyShopifyWebhook, async (req, res) => 
     // 3. Save order to local SQLite database
     const token = uuidv4()
     await db.run(
-      `INSERT INTO orders (id, shopify_order_id, order_number, customer_name, customer_phone, total_price, currency, payment_gateway, status, whatsapp_status, token)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO orders (id, shopify_order_id, order_number, customer_name, customer_phone, total_price, currency, payment_gateway, status, whatsapp_status, token, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(shopify_order_id) DO UPDATE SET
          customer_name = excluded.customer_name,
          customer_phone = excluded.customer_phone,
@@ -127,7 +128,8 @@ router.post('/shopify/orders-create', verifyShopifyWebhook, async (req, res) => 
         gateways.join(', ') || gateway,
         'pending',
         'pending',
-        token
+        token,
+        order.created_at
       ]
     )
 

@@ -276,8 +276,8 @@ router.post('/shopify/sync', async (req, res) => {
       const token = existing ? existing.token : crypto.randomUUID()
 
       await db.run(
-        `INSERT INTO orders (id, shopify_order_id, order_number, customer_name, customer_phone, total_price, currency, payment_gateway, status, whatsapp_status, token)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO orders (id, shopify_order_id, order_number, customer_name, customer_phone, total_price, currency, payment_gateway, status, whatsapp_status, token, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(shopify_order_id) DO UPDATE SET
            status = excluded.status,
            customer_name = excluded.customer_name,
@@ -295,7 +295,8 @@ router.post('/shopify/sync', async (req, res) => {
           gateways.join(', ') || gateway,
           status,
           status === 'pending' ? 'pending' : 'sent',
-          token
+          token,
+          order.created_at
         ]
       )
 
