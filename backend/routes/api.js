@@ -283,6 +283,7 @@ router.post('/shopify/sync', async (req, res) => {
            customer_name = excluded.customer_name,
            customer_phone = excluded.customer_phone,
            total_price = excluded.total_price,
+           created_at = excluded.created_at,
            updated_at = CURRENT_TIMESTAMP`,
         [
           order.id.toString(),
