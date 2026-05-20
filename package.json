@@ -1,0 +1,19 @@
+{
+  "name": "shopify-cod-whatsapp",
+  "version": "1.0.0",
+  "description": "Shopify COD Order Confirmation via WhatsApp",
+  "scripts": {
+    "setup": "npm install && npm run install-all",
+    "install-all": "npm run install-backend && npm run install-frontend",
+    "install-backend": "cd backend && npm install",
+    "install-frontend": "cd frontend && npm install",
+    "backend": "cd backend && npm run dev",
+    "frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
