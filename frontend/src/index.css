@@ -619,3 +619,235 @@ textarea.form-control {
   display: flex;
   gap: 0.5rem;
 }
+
+/* Mobile Responsiveness Improvements */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 1rem 0.75rem;
+  }
+
+  header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1.25rem;
+    margin-bottom: 1.75rem;
+    padding-bottom: 1.25rem;
+  }
+
+  .logo-section {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .nav-tabs {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .tab-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 0.6rem;
+    font-size: 0.85rem;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-card {
+    gap: 0.75rem;
+    padding: 1rem !important;
+  }
+
+  .stat-icon-wrapper {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.75rem;
+    flex-shrink: 0;
+  }
+
+  .stat-icon-wrapper svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .stat-value {
+    font-size: 1.25rem;
+  }
+
+  .stat-label {
+    font-size: 0.65rem;
+  }
+
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .search-wrapper {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .filter-selectors {
+    width: 100%;
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .select-filter {
+    flex: 1;
+    min-width: 0;
+    padding: 0.65rem 0.75rem;
+    font-size: 0.9rem;
+  }
+
+  .filter-selectors button {
+    flex-shrink: 0;
+  }
+
+  .filter-selectors .btn-primary {
+    flex: 2;
+    font-size: 0.8rem;
+    padding: 0.65rem 0.5rem;
+    justify-content: center;
+  }
+
+  /* Card layout for table on mobile */
+  table, thead, tbody, th, td, tr {
+    display: block;
+  }
+
+  thead tr {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+
+  tr {
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    background: rgba(15, 23, 42, 0.25);
+    margin-bottom: 1rem;
+    padding: 1.25rem 1rem;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  }
+
+  tr:hover td {
+    background: transparent;
+  }
+
+  td {
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    position: relative;
+    padding: 0.75rem 0;
+    padding-left: 45%;
+    text-align: right;
+    min-height: 2.5rem;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  td:last-child {
+    border-bottom: none;
+    padding-top: 1rem;
+    display: block;
+    padding-left: 0;
+  }
+
+  td::before {
+    position: absolute;
+    left: 0;
+    width: 40%;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    height: 100%;
+    top: 0;
+    padding-left: 0.25rem;
+  }
+
+  td:nth-of-type(1)::before { content: "Ordine"; }
+  td:nth-of-type(2)::before { content: "Ricezione"; }
+  td:nth-of-type(3)::before { content: "Cliente"; }
+  td:nth-of-type(4)::before { content: "Telefono"; }
+  td:nth-of-type(5)::before { content: "Totale"; }
+  td:nth-of-type(6)::before { content: "Stato"; }
+  td:nth-of-type(7)::before { content: none; }
+
+  /* Touch-friendly buttons in actions cell */
+  .actions-cell {
+    justify-content: space-between !important;
+    width: 100%;
+    margin-top: 0.25rem;
+    gap: 0.5rem;
+  }
+
+  .actions-cell button,
+  .actions-cell a {
+    flex: 1;
+    height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 0.5rem;
+  }
+
+  /* Settings Page responsive adjustments */
+  .settings-grid {
+    gap: 1rem;
+  }
+
+  .glass-card {
+    padding: 1.25rem 1rem;
+  }
+
+  .actions-footer {
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+  }
+
+  .actions-footer button {
+    width: 100%;
+    height: 44px;
+  }
+
+  .alert {
+    padding: 0.85rem 1rem;
+    font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pagination {
+    flex-direction: column;
+    gap: 1rem;
+    text-align: center;
+  }
+
+  .pagination-controls {
+    width: 100%;
+  }
+
+  .pagination-controls button {
+    flex: 1;
+    padding: 0.75rem;
+  }
+}
