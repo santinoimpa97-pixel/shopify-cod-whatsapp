@@ -6,6 +6,62 @@ import { sendWhatsAppMessage } from '../services/whatsapp.js'
 
 const router = express.Router()
 
+// 0. Debug Database Encoding (Temporary)
+router.get('/debug-db', async (req, res) => {
+  try {
+    const db = await getDb()
+    let dbType = 'unknown'
+    let encodingInfo = {}
+    
+    // Check database type and encoding
+    if (db.pool) {
+      dbType = 'PostgreSQL'
+      const serverEnc = await db.get('SHOW server_encoding')
+      const clientEnc = await db.get('SHOW client_encoding')
+      encodingInfo = {
+        server_encoding: serverEnc,
+        client_encoding: clientEnc
+      }
+    } else {
+      dbType = 'SQLite'
+      const pragmaEnc = await db.get('PRAGMA encoding')
+      encodingInfo = {
+        pragma_encoding: pragmaEnc
+      }
+    }
+
+    const settings = await db.get('SELECT whatsapp_template FROM settings ORDER BY id DESC LIMIT 1')
+    const template = settings ? settings.whatsapp_template : null
+    const charAnalysis = []
+    
+    if (template) {
+      for (let i = 0; i < template.length; i++) {
+        const char = template[i]
+        const code = template.charCodeAt(i)
+        if (code > 127 || code === 63) { // Include non-ASCII and question marks
+          charAnalysis.push({
+            pos: i,
+            char: char,
+            code: code,
+            hex: '0x' + code.toString(16).toUpperCase()
+          })
+        }
+      }
+    }
+
+    return res.json({
+      dbType,
+      encodingInfo,
+      templateLength: template ? template.length : 0,
+      templateRaw: template,
+      charAnalysis
+    })
+  } catch (error) {
+    console.error('Debug DB Error:', error)
+    return res.status(500).json({ error: error.message })
+  }
+})
+
 // 1. Get configurations
 router.get('/settings', async (req, res) => {
   try {
