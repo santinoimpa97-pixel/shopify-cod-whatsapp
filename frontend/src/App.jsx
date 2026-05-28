@@ -273,7 +273,7 @@ function App() {
       .replace(/{order_total}/g, `${order.total_price} ${order.currency}`)
       .replace(/{confirm_link}/g, confirmLink)
 
-    return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
+    return `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(text)}`
   }
 
   // Helper for template preview
