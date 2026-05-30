@@ -481,8 +481,13 @@ function App() {
         .replace(/{invoice_link}/g, invoiceLink)
     }
 
-    // Utilizziamo il formato universale wa.me che è più stabile ed evita la perdita del messaggio su Desktop
-    return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
+    // Rileva se l'utente è su un dispositivo mobile
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    const baseUrl = isMobile 
+      ? 'https://api.whatsapp.com/send' 
+      : 'https://web.whatsapp.com/send'
+
+    return `${baseUrl}?phone=${phone}&text=${encodeURIComponent(text)}`
   }
 
   // Helper for template preview
