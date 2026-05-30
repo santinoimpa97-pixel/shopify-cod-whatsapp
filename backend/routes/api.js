@@ -753,7 +753,7 @@ router.post('/shopify/sync-drafts', async (req, res) => {
     const shop = settings.shopify_store_url.replace(/^https?:\/\//, '').replace(/\/$/, '').trim()
     const accessToken = settings.shopify_access_token.trim()
     
-    const shopifyUrl = `https://${shop}/admin/api/2024-04/draft_orders.json?limit=50&status=open`
+    const shopifyUrl = `https://${shop}/admin/api/2024-04/draft_orders.json?limit=50&status=any`
     const response = await fetch(shopifyUrl, {
       method: 'GET',
       headers: {
