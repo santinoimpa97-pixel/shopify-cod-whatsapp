@@ -15,12 +15,17 @@ import {
   Save, 
   Database, 
   Smartphone, 
-  Send 
+  Send,
+  ShoppingCart,
+  FileText
 } from 'lucide-react'
 
 function App() {
   const [activeTab, setActiveTab] = useState('orders')
   const [orders, setOrders] = useState([])
+  const [abandonedCheckouts, setAbandonedCheckouts] = useState([])
+  const [draftOrders, setDraftOrders] = useState([])
+  
   const [stats, setStats] = useState({
     total: 0,
     confirmed: 0,
@@ -28,8 +33,11 @@ function App() {
     sent: 0,
     cancelled: 0,
     failed: 0,
-    conversionRate: 0
+    conversionRate: 0,
+    abandoned: { total: 0, recovered: 0, rate: 0 },
+    drafts: { total: 0, completed: 0, rate: 0 }
   })
+  
   const [settings, setSettings] = useState({
     shopify_store_url: '',
     shopify_client_id: '',
@@ -41,21 +49,34 @@ function App() {
     whatsapp_api_url: '',
     whatsapp_api_token: '',
     whatsapp_instance_id: '',
-    whatsapp_template: ''
+    whatsapp_template: '',
+    whatsapp_template_abandoned: '',
+    whatsapp_template_draft: ''
   })
 
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [loadingOrders, setLoadingOrders] = useState(false)
+  const [loadingAbandoned, setLoadingAbandoned] = useState(false)
+  const [loadingDrafts, setLoadingDrafts] = useState(false)
   const [loadingStats, setLoadingStats] = useState(false)
   const [loadingSettings, setLoadingSettings] = useState(false)
   const [savingSettings, setSavingSettings] = useState(false)
   const [syncingOrders, setSyncingOrders] = useState(false)
+  const [syncingAbandoned, setSyncingAbandoned] = useState(false)
+  const [syncingDrafts, setSyncingDrafts] = useState(false)
   const [alert, setAlert] = useState(null)
   
   // Pagination
   const [page, setPage] = useState(1)
   const [totalOrders, setTotalOrders] = useState(0)
+  
+  const [pageAbandoned, setPageAbandoned] = useState(1)
+  const [totalAbandoned, setTotalAbandoned] = useState(0)
+  
+  const [pageDrafts, setPageDrafts] = useState(1)
+  const [totalDrafts, setTotalDrafts] = useState(0)
+  
   const limit = 15
 
   // Trigger auto-dismiss alert
@@ -79,10 +100,30 @@ function App() {
     }
   }, [])
 
-  // Fetch orders when filter, search, or page changes
+  // Reset search and filters when tab changes to avoid cross-tab filter bugs
   useEffect(() => {
-    fetchOrders()
-  }, [searchQuery, statusFilter, page])
+    setSearchQuery('')
+    setStatusFilter('all')
+  }, [activeTab])
+
+  // Fetch data based on active tab and filters
+  useEffect(() => {
+    if (activeTab === 'orders') {
+      fetchOrders()
+    }
+  }, [activeTab, searchQuery, statusFilter, page])
+
+  useEffect(() => {
+    if (activeTab === 'abandoned') {
+      fetchAbandonedCheckouts()
+    }
+  }, [activeTab, searchQuery, statusFilter, pageAbandoned])
+
+  useEffect(() => {
+    if (activeTab === 'drafts') {
+      fetchDraftOrders()
+    }
+  }, [activeTab, searchQuery, statusFilter, pageDrafts])
 
   const fetchSettings = async () => {
     setLoadingSettings(true)
@@ -141,6 +182,48 @@ function App() {
       showAlert('error', 'Impossibile connettersi al backend.')
     } finally {
       setLoadingOrders(false)
+    }
+  }
+
+  const fetchAbandonedCheckouts = async () => {
+    setLoadingAbandoned(true)
+    try {
+      const offset = (pageAbandoned - 1) * limit
+      const url = `/api/abandoned-checkouts?search=${encodeURIComponent(searchQuery)}&status=${statusFilter}&limit=${limit}&offset=${offset}`
+      const res = await fetch(url)
+      if (res.ok) {
+        const data = await res.json()
+        setAbandonedCheckouts(data.checkouts)
+        setTotalAbandoned(data.total)
+      } else {
+        showAlert('error', 'Errore durante il caricamento dei carrelli abbandonati.')
+      }
+    } catch (err) {
+      console.error(err)
+      showAlert('error', 'Impossibile connettersi al backend.')
+    } finally {
+      setLoadingAbandoned(false)
+    }
+  }
+
+  const fetchDraftOrders = async () => {
+    setLoadingDrafts(true)
+    try {
+      const offset = (pageDrafts - 1) * limit
+      const url = `/api/draft-orders?search=${encodeURIComponent(searchQuery)}&status=${statusFilter}&limit=${limit}&offset=${offset}`
+      const res = await fetch(url)
+      if (res.ok) {
+        const data = await res.json()
+        setDraftOrders(data.drafts)
+        setTotalDrafts(data.total)
+      } else {
+        showAlert('error', 'Errore durante il caricamento delle bozze d\'ordine.')
+      }
+    } catch (err) {
+      console.error(err)
+      showAlert('error', 'Impossibile connettersi al backend.')
+    } finally {
+      setLoadingDrafts(false)
     }
   }
 
@@ -204,6 +287,46 @@ function App() {
     }
   }
 
+  const handleSyncAbandoned = async () => {
+    setSyncingAbandoned(true)
+    try {
+      const res = await fetch('/api/shopify/sync-abandoned', { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        showAlert('success', data.message)
+        fetchAbandonedCheckouts()
+        fetchStats()
+      } else {
+        showAlert('error', data.error || 'Errore durante la sincronizzazione dei carrelli.')
+      }
+    } catch (err) {
+      console.error(err)
+      showAlert('error', 'Errore di connessione durante la sincronizzazione.')
+    } finally {
+      setSyncingAbandoned(false)
+    }
+  }
+
+  const handleSyncDrafts = async () => {
+    setSyncingDrafts(true)
+    try {
+      const res = await fetch('/api/shopify/sync-drafts', { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        showAlert('success', data.message)
+        fetchDraftOrders()
+        fetchStats()
+      } else {
+        showAlert('error', data.error || 'Errore durante la sincronizzazione delle bozze.')
+      }
+    } catch (err) {
+      console.error(err)
+      showAlert('error', 'Errore di connessione durante la sincronizzazione.')
+    } finally {
+      setSyncingDrafts(false)
+    }
+  }
+
   const handleResendWhatsApp = async (orderId) => {
     try {
       const res = await fetch(`/api/orders/${orderId}/resend-whatsapp`, { method: 'POST' })
@@ -218,6 +341,40 @@ function App() {
     } catch (err) {
       console.error(err)
       showAlert('error', 'Errore di connessione durante l\'invio.')
+    }
+  }
+
+  const handleResendWhatsAppAbandoned = async (id) => {
+    try {
+      const res = await fetch(`/api/abandoned-checkouts/${id}/resend-whatsapp`, { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        showAlert('success', 'Messaggio inviato correttamente via WhatsApp API!')
+        fetchAbandonedCheckouts()
+        fetchStats()
+      } else {
+        showAlert('error', `Invio fallito: ${data.error || 'Errore sconosciuto'}`)
+      }
+    } catch (err) {
+      console.error(err)
+      showAlert('error', 'Errore di connessione.')
+    }
+  }
+
+  const handleResendWhatsAppDraft = async (id) => {
+    try {
+      const res = await fetch(`/api/draft-orders/${id}/resend-whatsapp`, { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        showAlert('success', 'Messaggio inviato correttamente via WhatsApp API!')
+        fetchDraftOrders()
+        fetchStats()
+      } else {
+        showAlert('error', `Invio fallito: ${data.error || 'Errore sconosciuto'}`)
+      }
+    } catch (err) {
+      console.error(err)
+      showAlert('error', 'Errore di connessione.')
     }
   }
 
@@ -256,22 +413,73 @@ function App() {
     }
   }
 
+  const handleRecoverCheckout = async (id) => {
+    try {
+      const res = await fetch(`/api/abandoned-checkouts/${id}/recover`, { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        showAlert('success', data.message)
+        fetchAbandonedCheckouts()
+        fetchStats()
+      } else {
+        showAlert('error', `Errore: ${data.error || 'Errore'}`)
+      }
+    } catch (err) {
+      console.error(err)
+      showAlert('error', 'Errore di connessione.')
+    }
+  }
+
+  const handleCompleteDraft = async (id) => {
+    try {
+      const res = await fetch(`/api/draft-orders/${id}/complete`, { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        showAlert('success', data.message)
+        fetchDraftOrders()
+        fetchStats()
+      } else {
+        showAlert('error', `Errore: ${data.error || 'Errore'}`)
+      }
+    } catch (err) {
+      console.error(err)
+      showAlert('error', 'Errore di connessione.')
+    }
+  }
+
   const showAlert = (type, message) => {
     setAlert({ type, message })
   }
 
-  // Generates link for wa.me manual flow
-  const getManualWhatsAppLink = (order) => {
+  const getManualWhatsAppLink = (order, type = 'order') => {
     const phone = order.customer_phone
     const domain = settings.app_url || window.location.origin
-    const confirmLink = `${domain.trim().replace(/\/$/, '')}/confirm/${order.token}`
     
-    let text = settings.whatsapp_template || ''
-    text = text
-      .replace(/{customer_name}/g, order.customer_name)
-      .replace(/{order_number}/g, order.order_number)
-      .replace(/{order_total}/g, `${order.total_price} ${order.currency}`)
-      .replace(/{confirm_link}/g, confirmLink)
+    let text = ''
+    if (type === 'order') {
+      const confirmLink = `${domain.trim().replace(/\/$/, '')}/confirm/${order.token}`
+      text = settings.whatsapp_template || ''
+      text = text
+        .replace(/{customer_name}/g, order.customer_name)
+        .replace(/{order_number}/g, order.order_number)
+        .replace(/{order_total}/g, `${order.total_price} ${order.currency}`)
+        .replace(/{confirm_link}/g, confirmLink)
+    } else if (type === 'abandoned') {
+      const recoveryLink = `${domain.trim().replace(/\/$/, '')}/recover-checkout/${order.token}`
+      text = settings.whatsapp_template_abandoned || ''
+      text = text
+        .replace(/{customer_name}/g, order.customer_name)
+        .replace(/{order_total}/g, `${order.total_price} ${order.currency}`)
+        .replace(/{recovery_link}/g, recoveryLink)
+    } else if (type === 'draft') {
+      const invoiceLink = `${domain.trim().replace(/\/$/, '')}/pay-draft/${order.token}`
+      text = settings.whatsapp_template_draft || ''
+      text = text
+        .replace(/{customer_name}/g, order.customer_name)
+        .replace(/{draft_number}/g, order.draft_order_number)
+        .replace(/{order_total}/g, `${order.total_price} ${order.currency}`)
+        .replace(/{invoice_link}/g, invoiceLink)
+    }
 
     // Rileva se l'utente è su un dispositivo mobile
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
@@ -283,38 +491,82 @@ function App() {
   }
 
   // Helper for template preview
-  const getTemplatePreview = () => {
+  const getTemplatePreview = (type = 'order') => {
     const testOrder = {
       customer_name: 'Mario Rossi',
       order_number: '1024',
+      draft_order_number: 'DRAFT1024',
       total_price: '45.00',
       currency: 'EUR',
       token: 'test-token-123'
     }
     const domain = settings.app_url || window.location.origin
-    const confirmLink = `${domain.trim().replace(/\/$/, '')}/confirm/${testOrder.token}`
     
-    let text = settings.whatsapp_template || 'Nessun modello configurato.'
-    return text
-      .replace(/{customer_name}/g, testOrder.customer_name)
-      .replace(/{order_number}/g, testOrder.order_number)
-      .replace(/{order_total}/g, `${testOrder.total_price} ${testOrder.currency}`)
-      .replace(/{confirm_link}/g, confirmLink)
+    if (type === 'order') {
+      const confirmLink = `${domain.trim().replace(/\/$/, '')}/confirm/${testOrder.token}`
+      let text = settings.whatsapp_template || 'Nessun modello configurato.'
+      return text
+        .replace(/{customer_name}/g, testOrder.customer_name)
+        .replace(/{order_number}/g, testOrder.order_number)
+        .replace(/{order_total}/g, `${testOrder.total_price} ${testOrder.currency}`)
+        .replace(/{confirm_link}/g, confirmLink)
+    } else if (type === 'abandoned') {
+      const recoveryLink = `${domain.trim().replace(/\/$/, '')}/recover-checkout/${testOrder.token}`
+      let text = settings.whatsapp_template_abandoned || 'Nessun modello configurato.'
+      return text
+        .replace(/{customer_name}/g, testOrder.customer_name)
+        .replace(/{order_total}/g, `${testOrder.total_price} ${testOrder.currency}`)
+        .replace(/{recovery_link}/g, recoveryLink)
+    } else if (type === 'draft') {
+      const invoiceLink = `${domain.trim().replace(/\/$/, '')}/pay-draft/${testOrder.token}`
+      let text = settings.whatsapp_template_draft || 'Nessun modello configurato.'
+      return text
+        .replace(/{customer_name}/g, testOrder.customer_name)
+        .replace(/{draft_number}/g, testOrder.draft_order_number)
+        .replace(/{order_total}/g, `${testOrder.total_price} ${testOrder.currency}`)
+        .replace(/{invoice_link}/g, invoiceLink)
+    }
   }
 
-  const getStatusBadge = (status) => {
-    switch (status) {
-      case 'confirmed':
-        return <span className="badge confirmed"><CheckCircle2 size={12} /> Confermato</span>
-      case 'cancelled':
-        return <span className="badge cancelled"><XCircle size={12} /> Annullato</span>
-      case 'sent':
-        return <span className="badge sent"><Send size={12} /> Inviato</span>
-      case 'failed':
-        return <span className="badge failed"><AlertTriangle size={12} /> Errore</span>
-      case 'pending':
-      default:
-        return <span className="badge pending"><Clock size={12} /> Pendente</span>
+  const getStatusBadge = (status, tab = 'orders') => {
+    if (tab === 'orders') {
+      switch (status) {
+        case 'confirmed':
+          return <span className="badge confirmed"><CheckCircle2 size={12} /> Confermato</span>
+        case 'cancelled':
+          return <span className="badge cancelled"><XCircle size={12} /> Annullato</span>
+        case 'sent':
+          return <span className="badge sent"><Send size={12} /> Inviato</span>
+        case 'failed':
+          return <span className="badge failed"><AlertTriangle size={12} /> Errore</span>
+        case 'pending':
+        default:
+          return <span className="badge pending"><Clock size={12} /> Pendente</span>
+      }
+    } else if (tab === 'abandoned') {
+      switch (status) {
+        case 'recovered':
+          return <span className="badge confirmed"><CheckCircle2 size={12} /> Recuperato</span>
+        case 'sent':
+          return <span className="badge sent"><Send size={12} /> Inviato WA</span>
+        case 'failed':
+          return <span className="badge failed"><AlertTriangle size={12} /> Errore</span>
+        case 'pending':
+        default:
+          return <span className="badge pending"><Clock size={12} /> Abbandonato</span>
+      }
+    } else if (tab === 'drafts') {
+      switch (status) {
+        case 'completed':
+          return <span className="badge confirmed"><CheckCircle2 size={12} /> Completato</span>
+        case 'invoice_sent':
+          return <span className="badge sent"><Send size={12} /> Inviato WA</span>
+        case 'cancelled':
+          return <span className="badge cancelled"><XCircle size={12} /> Annullato</span>
+        case 'open':
+        default:
+          return <span className="badge pending"><Clock size={12} /> Aperto</span>
+      }
     }
   }
 
@@ -341,6 +593,18 @@ function App() {
             <ShoppingBag size={16} /> Ordini COD
           </button>
           <button 
+            className={`tab-btn ${activeTab === 'abandoned' ? 'active' : ''}`}
+            onClick={() => setActiveTab('abandoned')}
+          >
+            <ShoppingCart size={16} /> Carrelli Abbandonati
+          </button>
+          <button 
+            className={`tab-btn ${activeTab === 'drafts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('drafts')}
+          >
+            <FileText size={16} /> Bozze Ordini
+          </button>
+          <button 
             className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => setActiveTab('settings')}
           >
@@ -358,7 +622,7 @@ function App() {
       )}
 
       {/* Main Content View */}
-      {activeTab === 'orders' ? (
+      {activeTab === 'orders' && (
         <>
           {/* Stats Bar */}
           <div className="stats-grid">
@@ -591,7 +855,439 @@ function App() {
             )}
           </div>
         </>
-      ) : (
+      )}
+
+      {/* Abandoned Checkouts View */}
+      {activeTab === 'abandoned' && (
+        <>
+          {/* Stats Bar */}
+          <div className="stats-grid">
+            <div className="glass-card stat-card">
+              <div className="stat-icon-wrapper info">
+                <ShoppingCart size={24} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Carrelli Abbandonati</span>
+                <span className="stat-value">{stats.abandoned?.total || 0}</span>
+              </div>
+            </div>
+            
+            <div className="glass-card stat-card">
+              <div className="stat-icon-wrapper success">
+                <CheckCircle2 size={24} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Carrelli Recuperati</span>
+                <span className="stat-value">{stats.abandoned?.recovered || 0}</span>
+              </div>
+            </div>
+
+            <div className="glass-card stat-card">
+              <div className="stat-icon-wrapper primary">
+                <Check size={24} style={{ strokeWidth: 3 }} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Tasso di Recupero</span>
+                <span className="stat-value">{stats.abandoned?.rate || 0}%</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Table Card */}
+          <div className="glass-card">
+            {/* Filter and Search controls */}
+            <div className="filter-bar">
+              <div className="search-wrapper">
+                <Search className="search-icon" />
+                <input 
+                  type="text" 
+                  className="input-search"
+                  placeholder="Cerca per cliente o telefono..."
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setPageAbandoned(1); }}
+                />
+              </div>
+
+              <div className="filter-selectors">
+                <select 
+                  className="select-filter"
+                  value={statusFilter}
+                  onChange={(e) => { setStatusFilter(e.target.value); setPageAbandoned(1); }}
+                >
+                  <option value="all">Tutti gli stati</option>
+                  <option value="pending">Abbandonato (Nuovo)</option>
+                  <option value="sent">Inviato WhatsApp</option>
+                  <option value="recovered">Recuperato</option>
+                  <option value="failed">Errore di invio</option>
+                </select>
+
+                <button 
+                  className="btn btn-secondary btn-icon-only"
+                  onClick={() => { fetchAbandonedCheckouts(); fetchStats(); }}
+                  title="Rinfresca dati"
+                  disabled={syncingAbandoned}
+                >
+                  <RefreshCw size={16} className={(loadingAbandoned || loadingStats) ? 'animate-spin' : ''} />
+                </button>
+
+                <button 
+                  className="btn btn-primary"
+                  onClick={handleSyncAbandoned}
+                  title="Importa gli ultimi carrelli abbandonati da Shopify"
+                  disabled={syncingAbandoned}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginLeft: '0.5rem', background: 'var(--primary)' }}
+                >
+                  <RefreshCw size={14} className={syncingAbandoned ? 'animate-spin' : ''} />
+                  {syncingAbandoned ? 'Sincronizzazione...' : 'Sincronizza Carrelli'}
+                </button>
+              </div>
+            </div>
+
+            {/* Checkouts Table */}
+            {loadingAbandoned ? (
+              <div style={{ padding: '2rem 0' }}>
+                <div className="skeleton-line" style={{ marginBottom: '1rem', height: '2.5rem' }}></div>
+                <div className="skeleton-line" style={{ marginBottom: '0.75rem' }}></div>
+                <div className="skeleton-line" style={{ marginBottom: '0.75rem' }}></div>
+                <div className="skeleton-line" style={{ marginBottom: '0.75rem' }}></div>
+              </div>
+            ) : abandonedCheckouts.length === 0 ? (
+              <div className="empty-state">
+                <ShoppingCart className="empty-state-icon" />
+                <h3>Nessun carrello trovato</h3>
+                <p>Nessun carrello abbandonato corrisponde ai criteri di ricerca impostati o non sono presenti dati.</p>
+              </div>
+            ) : (
+              <>
+                <div className="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID Carrello</th>
+                        <th>Data Abbandono</th>
+                        <th>Cliente</th>
+                        <th>Telefono</th>
+                        <th>Totale Carrello</th>
+                        <th>Stato</th>
+                        <th style={{ textAlign: 'right' }}>Azioni</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {abandonedCheckouts.map((checkout) => (
+                        <tr key={checkout.id}>
+                          <td style={{ fontWeight: 500, fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                            {checkout.id.split('/').pop()}
+                          </td>
+                          <td style={{ color: 'var(--text-muted)' }}>
+                            {new Date(checkout.created_at).toLocaleString('it-IT', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </td>
+                          <td>{checkout.customer_name}</td>
+                          <td style={{ fontFamily: 'monospace' }}>{checkout.customer_phone}</td>
+                          <td style={{ fontWeight: 600 }}>{checkout.total_price} {checkout.currency}</td>
+                          <td>{getStatusBadge(checkout.status, 'abandoned')}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div className="actions-cell" style={{ justifyContent: 'flex-end' }}>
+                              {/* Send Manual/Automatic WhatsApp */}
+                              {settings.whatsapp_provider === 'manual' ? (
+                                <a 
+                                  href={getManualWhatsAppLink(checkout, 'abandoned')} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="btn btn-secondary btn-icon-only"
+                                  title="Invia WhatsApp Manuale (web/app)"
+                                >
+                                  <Smartphone size={15} style={{ color: '#25D366' }} />
+                                </a>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handleResendWhatsAppAbandoned(checkout.id)}
+                                    className="btn btn-secondary btn-icon-only"
+                                    title="Invia messaggio automatico"
+                                    disabled={checkout.customer_phone === 'Nessun numero'}
+                                  >
+                                    <Send size={15} style={{ color: 'var(--primary)' }} />
+                                  </button>
+                                  <a 
+                                    href={getManualWhatsAppLink(checkout, 'abandoned')} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="btn btn-secondary btn-icon-only"
+                                    title="Fallback Manuale"
+                                  >
+                                    <Smartphone size={15} style={{ color: 'var(--text-muted)' }} />
+                                  </a>
+                                </>
+                              )}
+
+                              {/* Action: Recover Manually */}
+                              <button
+                                onClick={() => handleRecoverCheckout(checkout.id)}
+                                className="btn btn-success btn-icon-only"
+                                title="Segna come Recuperato"
+                                disabled={checkout.status === 'recovered'}
+                              >
+                                <Check size={15} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {Math.ceil(totalAbandoned / limit) > 1 && (
+                  <div className="pagination">
+                    <span>
+                      Pagina {pageAbandoned} di {Math.ceil(totalAbandoned / limit)} ({totalAbandoned} carrelli)
+                    </span>
+                    <div className="pagination-controls">
+                      <button 
+                        className="btn btn-secondary" 
+                        disabled={pageAbandoned === 1}
+                        onClick={() => setPageAbandoned(p => Math.max(1, p - 1))}
+                      >
+                        Precedente
+                      </button>
+                      <button 
+                        className="btn btn-secondary" 
+                        disabled={pageAbandoned === Math.ceil(totalAbandoned / limit)}
+                        onClick={() => setPageAbandoned(p => Math.min(Math.ceil(totalAbandoned / limit), p + 1))}
+                      >
+                        Successiva
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Draft Orders View */}
+      {activeTab === 'drafts' && (
+        <>
+          {/* Stats Bar */}
+          <div className="stats-grid">
+            <div className="glass-card stat-card">
+              <div className="stat-icon-wrapper info">
+                <FileText size={24} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Bozze d'Ordine</span>
+                <span className="stat-value">{stats.drafts?.total || 0}</span>
+              </div>
+            </div>
+            
+            <div className="glass-card stat-card">
+              <div className="stat-icon-wrapper success">
+                <CheckCircle2 size={24} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Bozze Completate</span>
+                <span className="stat-value">{stats.drafts?.completed || 0}</span>
+              </div>
+            </div>
+
+            <div className="glass-card stat-card">
+              <div className="stat-icon-wrapper primary">
+                <Check size={24} style={{ strokeWidth: 3 }} />
+              </div>
+              <div className="stat-info">
+                <span className="stat-label">Tasso Completamento</span>
+                <span className="stat-value">{stats.drafts?.rate || 0}%</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Table Card */}
+          <div className="glass-card">
+            {/* Filter and Search controls */}
+            <div className="filter-bar">
+              <div className="search-wrapper">
+                <Search className="search-icon" />
+                <input 
+                  type="text" 
+                  className="input-search"
+                  placeholder="Cerca per numero bozza, cliente o telefono..."
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setPageDrafts(1); }}
+                />
+              </div>
+
+              <div className="filter-selectors">
+                <select 
+                  className="select-filter"
+                  value={statusFilter}
+                  onChange={(e) => { setStatusFilter(e.target.value); setPageDrafts(1); }}
+                >
+                  <option value="all">Tutti gli stati</option>
+                  <option value="open">Aperto (Nuovo)</option>
+                  <option value="invoice_sent">Inviato WhatsApp</option>
+                  <option value="completed">Completato</option>
+                  <option value="cancelled">Annullato</option>
+                </select>
+
+                <button 
+                  className="btn btn-secondary btn-icon-only"
+                  onClick={() => { fetchDraftOrders(); fetchStats(); }}
+                  title="Rinfresca dati"
+                  disabled={syncingDrafts}
+                >
+                  <RefreshCw size={16} className={(loadingDrafts || loadingStats) ? 'animate-spin' : ''} />
+                </button>
+
+                <button 
+                  className="btn btn-primary"
+                  onClick={handleSyncDrafts}
+                  title="Importa le ultime bozze d'ordine da Shopify"
+                  disabled={syncingDrafts}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginLeft: '0.5rem', background: 'var(--primary)' }}
+                >
+                  <RefreshCw size={14} className={syncingDrafts ? 'animate-spin' : ''} />
+                  {syncingDrafts ? 'Sincronizzazione...' : 'Sincronizza Bozze'}
+                </button>
+              </div>
+            </div>
+
+            {/* Drafts Table */}
+            {loadingDrafts ? (
+              <div style={{ padding: '2rem 0' }}>
+                <div className="skeleton-line" style={{ marginBottom: '1rem', height: '2.5rem' }}></div>
+                <div className="skeleton-line" style={{ marginBottom: '0.75rem' }}></div>
+                <div className="skeleton-line" style={{ marginBottom: '0.75rem' }}></div>
+                <div className="skeleton-line" style={{ marginBottom: '0.75rem' }}></div>
+              </div>
+            ) : draftOrders.length === 0 ? (
+              <div className="empty-state">
+                <FileText className="empty-state-icon" />
+                <h3>Nessuna bozza trovata</h3>
+                <p>Nessuna bozza d'ordine corrisponde ai criteri di ricerca impostati o non sono presenti dati.</p>
+              </div>
+            ) : (
+              <>
+                <div className="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Numero Bozza</th>
+                        <th>Data Creazione</th>
+                        <th>Cliente</th>
+                        <th>Telefono</th>
+                        <th>Totale Bozza</th>
+                        <th>Stato</th>
+                        <th style={{ textAlign: 'right' }}>Azioni</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {draftOrders.map((draft) => (
+                        <tr key={draft.id}>
+                          <td style={{ fontWeight: 600 }}>{draft.draft_order_number}</td>
+                          <td style={{ color: 'var(--text-muted)' }}>
+                            {new Date(draft.created_at).toLocaleString('it-IT', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </td>
+                          <td>{draft.customer_name}</td>
+                          <td style={{ fontFamily: 'monospace' }}>{draft.customer_phone}</td>
+                          <td style={{ fontWeight: 600 }}>{draft.total_price} {draft.currency}</td>
+                          <td>{getStatusBadge(draft.status, 'drafts')}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div className="actions-cell" style={{ justifyContent: 'flex-end' }}>
+                              {/* Send Manual/Automatic WhatsApp */}
+                              {settings.whatsapp_provider === 'manual' ? (
+                                <a 
+                                  href={getManualWhatsAppLink(draft, 'draft')} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="btn btn-secondary btn-icon-only"
+                                  title="Invia WhatsApp Manuale (web/app)"
+                                >
+                                  <Smartphone size={15} style={{ color: '#25D366' }} />
+                                </a>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handleResendWhatsAppDraft(draft.id)}
+                                    className="btn btn-secondary btn-icon-only"
+                                    title="Invia messaggio automatico"
+                                    disabled={draft.customer_phone === 'Nessun numero'}
+                                  >
+                                    <Send size={15} style={{ color: 'var(--primary)' }} />
+                                  </button>
+                                  <a 
+                                    href={getManualWhatsAppLink(draft, 'draft')} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="btn btn-secondary btn-icon-only"
+                                    title="Fallback Manuale"
+                                  >
+                                    <Smartphone size={15} style={{ color: 'var(--text-muted)' }} />
+                                  </a>
+                                </>
+                              )}
+
+                              {/* Action: Complete Manually */}
+                              <button
+                                onClick={() => handleCompleteDraft(draft.id)}
+                                className="btn btn-success btn-icon-only"
+                                title="Segna come Completata"
+                                disabled={draft.status === 'completed'}
+                              >
+                                <Check size={15} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {Math.ceil(totalDrafts / limit) > 1 && (
+                  <div className="pagination">
+                    <span>
+                      Pagina {pageDrafts} di {Math.ceil(totalDrafts / limit)} ({totalDrafts} bozze)
+                    </span>
+                    <div className="pagination-controls">
+                      <button 
+                        className="btn btn-secondary" 
+                        disabled={pageDrafts === 1}
+                        onClick={() => setPageDrafts(p => Math.max(1, p - 1))}
+                      >
+                        Precedente
+                      </button>
+                      <button 
+                        className="btn btn-secondary" 
+                        disabled={pageDrafts === Math.ceil(totalDrafts / limit)}
+                        onClick={() => setPageDrafts(p => Math.min(Math.ceil(totalDrafts / limit), p + 1))}
+                      >
+                        Successiva
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {activeTab === 'settings' && (
         /* Settings Section */
         <form onSubmit={handleSaveSettings} className="settings-grid">
           {/* Settings Fields */}
@@ -764,24 +1460,25 @@ function App() {
           </div>
 
           {/* Message Template Editor Panel */}
-          <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div>
+          <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            {/* 1. COD Template */}
+            <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '2rem' }}>
               <h3 className="settings-section-title">
-                <MessageSquare size={18} style={{ color: 'var(--primary)' }} /> Modello Messaggio WhatsApp
+                <MessageSquare size={18} style={{ color: 'var(--primary)' }} /> Modello Conferma Ordine COD
               </h3>
 
               <div className="form-group">
                 <label>Testo del Messaggio</label>
                 <textarea 
                   className="form-control"
-                  rows={6}
+                  rows={5}
                   required
                   value={settings.whatsapp_template}
                   onChange={(e) => setSettings({ ...settings, whatsapp_template: e.target.value })}
                   placeholder="Scrivi il messaggio..."
                 />
                 
-                <span className="form-help">Puoi inserire le seguenti variabili dinamiche che verranno sostituite automaticamente:</span>
+                <span className="form-help">Variabili dinamiche utilizzabili:</span>
                 <div className="variables-list">
                   <span className="variable-badge" onClick={() => setSettings(s => ({ ...s, whatsapp_template: s.whatsapp_template + '{customer_name}' }))}>{`{customer_name}`}</span>
                   <span className="variable-badge" onClick={() => setSettings(s => ({ ...s, whatsapp_template: s.whatsapp_template + '{order_number}' }))}>{`{order_number}`}</span>
@@ -791,49 +1488,163 @@ function App() {
               </div>
 
               {/* Preview Box */}
-              <div style={{ marginTop: '2rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem' }}>Anteprima Visiva Messaggio WhatsApp</label>
-                <div 
-                  style={{
-                    background: '#0b141a',
-                    backgroundImage: 'radial-gradient(#128c7e 0.5px, transparent 0.5px), radial-gradient(#128c7e 0.5px, #0b141a 0.5px)',
-                    backgroundSize: '20px 20px',
-                    backgroundPosition: '0 0, 10px 10px',
-                    borderRadius: '1.25rem',
-                    padding: '1.5rem',
-                    border: '1px solid rgba(255, 255, 255, 0.05)',
-                    position: 'relative'
-                  }}
-                >
-                  <div 
-                    style={{
-                      background: '#075e54',
-                      color: 'white',
-                      padding: '0.6rem 1rem',
-                      borderRadius: '0.75rem 0.75rem 0 0.75rem',
-                      maxWidth: '85%',
-                      marginLeft: 'auto',
-                      fontSize: '0.9rem',
-                      lineHeight: '1.4',
-                      whiteSpace: 'pre-wrap',
-                      boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
-                      borderRight: '4px solid #128c7e'
-                    }}
-                  >
-                    {getTemplatePreview()}
-                    <div style={{ textAlign: 'right', fontSize: '0.7rem', color: 'rgba(255,255,255,0.6)', marginTop: '0.4rem' }}>
+              <div style={{ marginTop: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Anteprima Visiva WhatsApp (Conferma COD)</label>
+                <div style={{
+                  background: '#0b141a',
+                  backgroundImage: 'radial-gradient(#128c7e 0.5px, transparent 0.5px), radial-gradient(#128c7e 0.5px, #0b141a 0.5px)',
+                  backgroundSize: '20px 20px',
+                  backgroundPosition: '0 0, 10px 10px',
+                  borderRadius: '1rem',
+                  padding: '1.25rem',
+                  border: '1px solid rgba(255, 255, 255, 0.05)'
+                }}>
+                  <div style={{
+                    background: '#075e54',
+                    color: 'white',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '0.75rem 0.75rem 0 0.75rem',
+                    maxWidth: '85%',
+                    marginLeft: 'auto',
+                    fontSize: '0.85rem',
+                    lineHeight: '1.4',
+                    whiteSpace: 'pre-wrap',
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                    borderRight: '4px solid #128c7e'
+                  }}>
+                    {getTemplatePreview('order')}
+                    <div style={{ textAlign: 'right', fontSize: '0.65rem', color: 'rgba(255,255,255,0.6)', marginTop: '0.4rem' }}>
                       10:24 ✔✔
                     </div>
                   </div>
                 </div>
               </div>
-
-              {settings.whatsapp_provider === 'manual' && (
-                <div className="manual-send-info">
-                  <strong>💡 Modalità Manuale:</strong> Premendo l'icona del telefono verde nella lista ordini, si aprirà una scheda di WhatsApp Web con il messaggio qui sopra precompilato pronto per essere inviato manualmente premendo Invio. Il link `{`{confirm_link}`}` consentirà comunque la conferma automatica quando cliccato dal cliente!
-                </div>
-              )}
             </div>
+
+            {/* 2. Abandoned Checkout Template */}
+            <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '2rem' }}>
+              <h3 className="settings-section-title">
+                <ShoppingCart size={18} style={{ color: '#25D366' }} /> Modello Recupero Carrelli Abbandonati
+              </h3>
+
+              <div className="form-group">
+                <label>Testo del Messaggio</label>
+                <textarea 
+                  className="form-control"
+                  rows={5}
+                  required
+                  value={settings.whatsapp_template_abandoned}
+                  onChange={(e) => setSettings({ ...settings, whatsapp_template_abandoned: e.target.value })}
+                  placeholder="Scrivi il messaggio di recupero..."
+                />
+                
+                <span className="form-help">Variabili dinamiche utilizzabili:</span>
+                <div className="variables-list">
+                  <span className="variable-badge" onClick={() => setSettings(s => ({ ...s, whatsapp_template_abandoned: s.whatsapp_template_abandoned + '{customer_name}' }))}>{`{customer_name}`}</span>
+                  <span className="variable-badge" onClick={() => setSettings(s => ({ ...s, whatsapp_template_abandoned: s.whatsapp_template_abandoned + '{order_total}' }))}>{`{order_total}`}</span>
+                  <span className="variable-badge" onClick={() => setSettings(s => ({ ...s, whatsapp_template_abandoned: s.whatsapp_template_abandoned + '{recovery_link}' }))}>{`{recovery_link}`}</span>
+                </div>
+              </div>
+
+              {/* Preview Box */}
+              <div style={{ marginTop: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Anteprima Visiva WhatsApp (Recupero Carrello)</label>
+                <div style={{
+                  background: '#0b141a',
+                  backgroundImage: 'radial-gradient(#128c7e 0.5px, transparent 0.5px), radial-gradient(#128c7e 0.5px, #0b141a 0.5px)',
+                  backgroundSize: '20px 20px',
+                  backgroundPosition: '0 0, 10px 10px',
+                  borderRadius: '1rem',
+                  padding: '1.25rem',
+                  border: '1px solid rgba(255, 255, 255, 0.05)'
+                }}>
+                  <div style={{
+                    background: '#075e54',
+                    color: 'white',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '0.75rem 0.75rem 0 0.75rem',
+                    maxWidth: '85%',
+                    marginLeft: 'auto',
+                    fontSize: '0.85rem',
+                    lineHeight: '1.4',
+                    whiteSpace: 'pre-wrap',
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                    borderRight: '4px solid #128c7e'
+                  }}>
+                    {getTemplatePreview('abandoned')}
+                    <div style={{ textAlign: 'right', fontSize: '0.65rem', color: 'rgba(255,255,255,0.6)', marginTop: '0.4rem' }}>
+                      10:24 ✔✔
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Draft Order Template */}
+            <div>
+              <h3 className="settings-section-title">
+                <FileText size={18} style={{ color: 'var(--secondary)' }} /> Modello Pagamento Bozze Ordini
+              </h3>
+
+              <div className="form-group">
+                <label>Testo del Messaggio</label>
+                <textarea 
+                  className="form-control"
+                  rows={5}
+                  required
+                  value={settings.whatsapp_template_draft}
+                  onChange={(e) => setSettings({ ...settings, whatsapp_template_draft: e.target.value })}
+                  placeholder="Scrivi il messaggio di fatturazione..."
+                />
+                
+                <span className="form-help">Variabili dinamiche utilizzabili:</span>
+                <div className="variables-list">
+                  <span className="variable-badge" onClick={() => setSettings(s => ({ ...s, whatsapp_template_draft: s.whatsapp_template_draft + '{customer_name}' }))}>{`{customer_name}`}</span>
+                  <span className="variable-badge" onClick={() => setSettings(s => ({ ...s, whatsapp_template_draft: s.whatsapp_template_draft + '{draft_number}' }))}>{`{draft_number}`}</span>
+                  <span className="variable-badge" onClick={() => setSettings(s => ({ ...s, whatsapp_template_draft: s.whatsapp_template_draft + '{order_total}' }))}>{`{order_total}`}</span>
+                  <span className="variable-badge" onClick={() => setSettings(s => ({ ...s, whatsapp_template_draft: s.whatsapp_template_draft + '{invoice_link}' }))}>{`{invoice_link}`}</span>
+                </div>
+              </div>
+
+              {/* Preview Box */}
+              <div style={{ marginTop: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Anteprima Visiva WhatsApp (Pagamento Bozza)</label>
+                <div style={{
+                  background: '#0b141a',
+                  backgroundImage: 'radial-gradient(#128c7e 0.5px, transparent 0.5px), radial-gradient(#128c7e 0.5px, #0b141a 0.5px)',
+                  backgroundSize: '20px 20px',
+                  backgroundPosition: '0 0, 10px 10px',
+                  borderRadius: '1rem',
+                  padding: '1.25rem',
+                  border: '1px solid rgba(255, 255, 255, 0.05)'
+                }}>
+                  <div style={{
+                    background: '#075e54',
+                    color: 'white',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '0.75rem 0.75rem 0 0.75rem',
+                    maxWidth: '85%',
+                    marginLeft: 'auto',
+                    fontSize: '0.85rem',
+                    lineHeight: '1.4',
+                    whiteSpace: 'pre-wrap',
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                    borderRight: '4px solid #128c7e'
+                  }}>
+                    {getTemplatePreview('draft')}
+                    <div style={{ textAlign: 'right', fontSize: '0.65rem', color: 'rgba(255,255,255,0.6)', marginTop: '0.4rem' }}>
+                      10:24 ✔✔
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {settings.whatsapp_provider === 'manual' && (
+              <div className="manual-send-info" style={{ marginTop: '1rem' }}>
+                <strong>💡 Invio Manuale:</strong> Cliccando sul pulsante del telefono nella lista ordini, carrelli o bozze, verrà aperto WhatsApp Web o l'app di WhatsApp pre-compilando il messaggio corrispondente. I link di tracciamento e conferma consentiranno di monitorare i clic e registrare le conversioni in tempo reale!
+              </div>
+            )}
 
             <div className="actions-footer">
               <button 

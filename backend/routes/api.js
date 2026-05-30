@@ -87,7 +87,9 @@ router.post('/settings', async (req, res) => {
     whatsapp_api_url,
     whatsapp_api_token,
     whatsapp_instance_id,
-    whatsapp_template
+    whatsapp_template,
+    whatsapp_template_abandoned,
+    whatsapp_template_draft
   } = req.body
 
   try {
@@ -111,6 +113,8 @@ router.post('/settings', async (req, res) => {
           whatsapp_api_token = ?,
           whatsapp_instance_id = ?,
           whatsapp_template = ?,
+          whatsapp_template_abandoned = ?,
+          whatsapp_template_draft = ?,
           updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
         [
@@ -125,6 +129,8 @@ router.post('/settings', async (req, res) => {
           whatsapp_api_token,
           whatsapp_instance_id,
           whatsapp_template,
+          whatsapp_template_abandoned,
+          whatsapp_template_draft,
           settings.id
         ]
       )
@@ -133,8 +139,8 @@ router.post('/settings', async (req, res) => {
       await db.run(
         `INSERT INTO settings (
           shopify_store_url, shopify_client_id, shopify_client_secret, shopify_access_token, shopify_webhook_secret, app_url,
-          whatsapp_provider, whatsapp_api_url, whatsapp_api_token, whatsapp_instance_id, whatsapp_template
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          whatsapp_provider, whatsapp_api_url, whatsapp_api_token, whatsapp_instance_id, whatsapp_template, whatsapp_template_abandoned, whatsapp_template_draft
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           shopify_store_url,
           shopify_client_id,
@@ -146,7 +152,9 @@ router.post('/settings', async (req, res) => {
           whatsapp_api_url,
           whatsapp_api_token,
           whatsapp_instance_id,
-          whatsapp_template
+          whatsapp_template,
+          whatsapp_template_abandoned,
+          whatsapp_template_draft
         ]
       )
     }
@@ -176,7 +184,7 @@ router.get('/shopify/auth', async (req, res) => {
 
     const cleanShop = shop.replace(/^https?:\/\//, '').replace(/\/$/, '').trim()
     const redirectUri = `${settings.app_url.trim().replace(/\/$/, '')}/api/shopify/auth/callback`
-    const authorizeUrl = `https://${cleanShop}/admin/oauth/authorize?client_id=${settings.shopify_client_id.trim()}&scope=read_orders,write_orders&redirect_uri=${encodeURIComponent(redirectUri)}`
+    const authorizeUrl = `https://${cleanShop}/admin/oauth/authorize?client_id=${settings.shopify_client_id.trim()}&scope=read_orders,write_orders,read_draft_orders&redirect_uri=${encodeURIComponent(redirectUri)}`
 
     console.log(`[Shopify Auth] Reindirizzamento a OAuth: ${authorizeUrl}`)
     return res.redirect(authorizeUrl)
@@ -434,6 +442,7 @@ router.get('/stats', async (req, res) => {
   try {
     const db = await getDb()
 
+    // 1. Orders Stats
     const total = await db.get('SELECT COUNT(*) as count FROM orders')
     const confirmed = await db.get("SELECT COUNT(*) as count FROM orders WHERE status = 'confirmed'")
     const pending = await db.get("SELECT COUNT(*) as count FROM orders WHERE status = 'pending'")
@@ -445,6 +454,20 @@ router.get('/stats', async (req, res) => {
       ? Math.round((confirmed.count / total.count) * 100) 
       : 0
 
+    // 2. Abandoned Checkouts Stats
+    const totalAbandoned = await db.get('SELECT COUNT(*) as count FROM abandoned_checkouts')
+    const recoveredAbandoned = await db.get("SELECT COUNT(*) as count FROM abandoned_checkouts WHERE status = 'recovered'")
+    const recoveryRate = totalAbandoned.count > 0
+      ? Math.round((recoveredAbandoned.count / totalAbandoned.count) * 100)
+      : 0
+
+    // 3. Draft Orders Stats
+    const totalDrafts = await db.get('SELECT COUNT(*) as count FROM draft_orders')
+    const completedDrafts = await db.get("SELECT COUNT(*) as count FROM draft_orders WHERE status = 'completed'")
+    const draftCompletionRate = totalDrafts.count > 0
+      ? Math.round((completedDrafts.count / totalDrafts.count) * 100)
+      : 0
+
     return res.json({
       total: total.count,
       confirmed: confirmed.count,
@@ -452,7 +475,19 @@ router.get('/stats', async (req, res) => {
       sent: sent.count,
       cancelled: cancelled.count,
       failed: failed.count,
-      conversionRate: convRate
+      conversionRate: convRate,
+      
+      // New stats
+      abandoned: {
+        total: totalAbandoned.count,
+        recovered: recoveredAbandoned.count,
+        rate: recoveryRate
+      },
+      drafts: {
+        total: totalDrafts.count,
+        completed: completedDrafts.count,
+        rate: draftCompletionRate
+      }
     })
   } catch (error) {
     console.error('Error fetching stats:', error)
@@ -559,6 +594,390 @@ router.post('/orders/:id/cancel', async (req, res) => {
     })
   } catch (error) {
     console.error(`Error manually cancelling order ${id}:`, error)
+    return res.status(500).json({ error: 'Internal Server Error' })
+  }
+})
+
+// 8. Sync abandoned checkouts from Shopify via GraphQL
+router.post('/shopify/sync-abandoned', async (req, res) => {
+  try {
+    const db = await getDb()
+    const settings = await db.get('SELECT shopify_store_url, shopify_access_token FROM settings ORDER BY id DESC LIMIT 1')
+
+    if (!settings || !settings.shopify_store_url || !settings.shopify_access_token) {
+      return res.status(400).json({ error: 'Configurazione Shopify incompleta o non collegata.' })
+    }
+
+    const shop = settings.shopify_store_url.replace(/^https?:\/\//, '').replace(/\/$/, '').trim()
+    const accessToken = settings.shopify_access_token.trim()
+    
+    const shopifyUrl = `https://${shop}/admin/api/2024-04/graphql.json`
+    
+    const graphqlQuery = `
+      query AbandonedCheckouts {
+        abandonedCheckouts(first: 50) {
+          nodes {
+            id
+            abandonedCheckoutUrl
+            createdAt
+            totalPriceSet {
+              shopMoney {
+                amount
+                currencyCode
+              }
+            }
+            customer {
+              firstName
+              lastName
+              phone
+              email
+            }
+          }
+        }
+      }
+    `
+
+    const response = await fetch(shopifyUrl, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ query: graphqlQuery })
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`Errore API Shopify GraphQL: ${response.status} - ${errText}`)
+    }
+
+    const resJson = await response.json()
+    if (resJson.errors) {
+      throw new Error(`Errore GraphQL: ${JSON.stringify(resJson.errors)}`)
+    }
+
+    const nodes = resJson.data?.abandonedCheckouts?.nodes || []
+    let importedCount = 0
+    let updatedCount = 0
+
+    for (const node of nodes) {
+      const customer = node.customer
+      const customerName = customer 
+        ? `${customer.firstName || ''} ${customer.lastName || ''}`.trim()
+        : 'Cliente Shopify'
+
+      const rawPhone = customer?.phone || null
+      if (!rawPhone) continue
+
+      let cleanPhone = rawPhone.replace(/[^0-9]/g, '')
+      if (cleanPhone.startsWith('3') && cleanPhone.length === 10) {
+        cleanPhone = '39' + cleanPhone
+      }
+
+      const totalPrice = node.totalPriceSet?.shopMoney?.amount || '0.00'
+      const currency = node.totalPriceSet?.shopMoney?.currencyCode || 'EUR'
+
+      const existing = await db.get('SELECT status, token FROM abandoned_checkouts WHERE shopify_checkout_id = ?', [node.id])
+      const token = existing ? existing.token : crypto.randomUUID()
+      const status = existing ? existing.status : 'pending'
+
+      await db.run(
+        `INSERT INTO abandoned_checkouts (id, shopify_checkout_id, customer_name, customer_phone, total_price, currency, abandoned_checkout_url, status, whatsapp_status, token, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(shopify_checkout_id) DO UPDATE SET
+           customer_name = excluded.customer_name,
+           customer_phone = excluded.customer_phone,
+           total_price = excluded.total_price,
+           abandoned_checkout_url = excluded.abandoned_checkout_url,
+           updated_at = CURRENT_TIMESTAMP`,
+        [
+          node.id,
+          node.id,
+          customerName,
+          cleanPhone,
+          totalPrice,
+          currency,
+          node.abandonedCheckoutUrl,
+          status,
+          existing ? 'sent' : 'pending',
+          token,
+          node.createdAt
+        ]
+      )
+
+      if (!existing) {
+        importedCount++
+      } else {
+        updatedCount++
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Sincronizzazione carrelli abbandonati completata! Importati ${importedCount} nuovi carrelli, aggiornati ${updatedCount} esistenti.`
+    })
+  } catch (error) {
+    console.error('[Shopify Abandoned Sync] Errore:', error)
+    return res.status(500).json({ error: `Errore sincronizzazione carrelli: ${error.message}` })
+  }
+})
+
+// 9. Sync Draft Orders from Shopify via REST
+router.post('/shopify/sync-drafts', async (req, res) => {
+  try {
+    const db = await getDb()
+    const settings = await db.get('SELECT shopify_store_url, shopify_access_token FROM settings ORDER BY id DESC LIMIT 1')
+
+    if (!settings || !settings.shopify_store_url || !settings.shopify_access_token) {
+      return res.status(400).json({ error: 'Configurazione Shopify incompleta o non collegata.' })
+    }
+
+    const shop = settings.shopify_store_url.replace(/^https?:\/\//, '').replace(/\/$/, '').trim()
+    const accessToken = settings.shopify_access_token.trim()
+    
+    const shopifyUrl = `https://${shop}/admin/api/2024-04/draft_orders.json?limit=50&status=open`
+    const response = await fetch(shopifyUrl, {
+      method: 'GET',
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json'
+      }
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`Errore API Shopify REST Drafts: ${response.status} - ${errText}`)
+    }
+
+    const data = await response.json()
+    const drafts = data.draft_orders || []
+    let importedCount = 0
+    let updatedCount = 0
+
+    for (const draft of drafts) {
+      const customer = draft.customer
+      const customerName = customer 
+        ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
+        : 'Cliente Shopify'
+
+      const rawPhone = draft.phone || 
+                       customer?.phone || 
+                       draft.shipping_address?.phone || 
+                       draft.billing_address?.phone || 
+                       null
+
+      if (!rawPhone) continue
+
+      let cleanPhone = rawPhone.replace(/[^0-9]/g, '')
+      if (cleanPhone.startsWith('3') && cleanPhone.length === 10) {
+        cleanPhone = '39' + cleanPhone
+      }
+
+      const existing = await db.get('SELECT status, token FROM draft_orders WHERE shopify_draft_order_id = ?', [draft.id.toString()])
+      const token = existing ? existing.token : crypto.randomUUID()
+      
+      let status = 'open'
+      if (draft.status === 'completed' || draft.order_id !== null) {
+        status = 'completed'
+      } else if (draft.status === 'invoice_sent') {
+        status = 'invoice_sent'
+      }
+
+      await db.run(
+        `INSERT INTO draft_orders (id, shopify_draft_order_id, draft_order_number, customer_name, customer_phone, total_price, currency, invoice_url, status, whatsapp_status, token, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(shopify_draft_order_id) DO UPDATE SET
+           customer_name = excluded.customer_name,
+           customer_phone = excluded.customer_phone,
+           total_price = excluded.total_price,
+           invoice_url = excluded.invoice_url,
+           status = CASE WHEN draft_orders.status = 'completed' THEN 'completed' ELSE excluded.status END,
+           updated_at = CURRENT_TIMESTAMP`,
+        [
+          draft.id.toString(),
+          draft.id.toString(),
+          draft.name.toString(),
+          customerName,
+          cleanPhone,
+          draft.total_price,
+          draft.currency,
+          draft.invoice_url,
+          status,
+          existing ? 'sent' : 'pending',
+          token,
+          draft.created_at
+        ]
+      )
+
+      if (!existing) {
+        importedCount++
+      } else {
+        updatedCount++
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Sincronizzazione bozze d'ordine completata! Importate ${importedCount} nuove bozze, aggiornate ${updatedCount} esistenti.`
+    })
+  } catch (error) {
+    console.error('[Shopify Drafts Sync] Errore:', error)
+    return res.status(500).json({ error: `Errore sincronizzazione bozze: ${error.message}` })
+  }
+})
+
+// 10. Get abandoned checkouts list
+router.get('/abandoned-checkouts', async (req, res) => {
+  const { search, status, limit = 50, offset = 0 } = req.query
+
+  try {
+    const db = await getDb()
+    let query = 'SELECT * FROM abandoned_checkouts WHERE 1=1'
+    const params = []
+
+    if (status && status !== 'all') {
+      query += ' AND status = ?'
+      params.push(status)
+    }
+
+    if (search) {
+      query += ' AND (LOWER(customer_name) LIKE ? OR customer_phone LIKE ?)'
+      params.push(`%${search.toLowerCase()}%`, `%${search}%`)
+    }
+
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    params.push(parseInt(limit, 10), parseInt(offset, 10))
+
+    const checkouts = await db.all(query, params)
+    
+    let countQuery = 'SELECT COUNT(*) as count FROM abandoned_checkouts WHERE 1=1'
+    const countParams = []
+
+    if (status && status !== 'all') {
+      countQuery += ' AND status = ?'
+      countParams.push(status)
+    }
+
+    if (search) {
+      countQuery += ' AND (LOWER(customer_name) LIKE ? OR customer_phone LIKE ?)'
+      countParams.push(`%${search.toLowerCase()}%`, `%${search}%`)
+    }
+
+    const countResult = await db.get(countQuery, countParams)
+
+    return res.json({
+      checkouts,
+      total: countResult.count
+    })
+  } catch (error) {
+    console.error('Error fetching abandoned checkouts:', error)
+    return res.status(500).json({ error: 'Internal Server Error' })
+  }
+})
+
+// 11. Get draft orders list
+router.get('/draft-orders', async (req, res) => {
+  const { search, status, limit = 50, offset = 0 } = req.query
+
+  try {
+    const db = await getDb()
+    let query = 'SELECT * FROM draft_orders WHERE 1=1'
+    const params = []
+
+    if (status && status !== 'all') {
+      query += ' AND status = ?'
+      params.push(status)
+    }
+
+    if (search) {
+      query += ' AND (draft_order_number LIKE ? OR LOWER(customer_name) LIKE ? OR customer_phone LIKE ?)'
+      params.push(`%${search}%`, `%${search.toLowerCase()}%`, `%${search}%`)
+    }
+
+    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    params.push(parseInt(limit, 10), parseInt(offset, 10))
+
+    const drafts = await db.all(query, params)
+    
+    let countQuery = 'SELECT COUNT(*) as count FROM draft_orders WHERE 1=1'
+    const countParams = []
+
+    if (status && status !== 'all') {
+      countQuery += ' AND status = ?'
+      countParams.push(status)
+    }
+
+    if (search) {
+      countQuery += ' AND (draft_order_number LIKE ? OR LOWER(customer_name) LIKE ? OR customer_phone LIKE ?)'
+      countParams.push(`%${search}%`, `%${search.toLowerCase()}%`, `%${search}%`)
+    }
+
+    const countResult = await db.get(countQuery, countParams)
+
+    return res.json({
+      drafts,
+      total: countResult.count
+    })
+  } catch (error) {
+    console.error('Error fetching draft orders:', error)
+    return res.status(500).json({ error: 'Internal Server Error' })
+  }
+})
+
+// 12. Manually resend WhatsApp for Abandoned Checkout
+router.post('/abandoned-checkouts/:id/resend-whatsapp', async (req, res) => {
+  const { id } = req.params
+  try {
+    const result = await sendWhatsAppMessage(id, 'abandoned')
+    if (result.success) {
+      return res.json({ success: true, message: 'Messaggio WhatsApp inviato correttamente' })
+    } else {
+      return res.status(400).json({ success: false, error: result.error || result.reason })
+    }
+  } catch (error) {
+    console.error(`Error resending WhatsApp for abandoned checkout ${id}:`, error)
+    return res.status(500).json({ error: error.message || 'Internal Server Error' })
+  }
+})
+
+// 13. Manually resend WhatsApp for Draft Order
+router.post('/draft-orders/:id/resend-whatsapp', async (req, res) => {
+  const { id } = req.params
+  try {
+    const result = await sendWhatsAppMessage(id, 'draft')
+    if (result.success) {
+      return res.json({ success: true, message: 'Messaggio WhatsApp inviato correttamente' })
+    } else {
+      return res.status(400).json({ success: false, error: result.error || result.reason })
+    }
+  } catch (error) {
+    console.error(`Error resending WhatsApp for draft order ${id}:`, error)
+    return res.status(500).json({ error: error.message || 'Internal Server Error' })
+  }
+})
+
+// 14. Manually Recover Abandoned Checkout
+router.post('/abandoned-checkouts/:id/recover', async (req, res) => {
+  const { id } = req.params
+  try {
+    const db = await getDb()
+    await db.run("UPDATE abandoned_checkouts SET status = 'recovered', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id])
+    return res.json({ success: true, message: 'Carrello contrassegnato come recuperato' })
+  } catch (error) {
+    console.error(error)
+    return res.status(500).json({ error: 'Internal Server Error' })
+  }
+})
+
+// 15. Manually Complete Draft Order
+router.post('/draft-orders/:id/complete', async (req, res) => {
+  const { id } = req.params
+  try {
+    const db = await getDb()
+    await db.run("UPDATE draft_orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id])
+    return res.json({ success: true, message: 'Bozza d\'ordine contrassegnata come completata' })
+  } catch (error) {
+    console.error(error)
     return res.status(500).json({ error: 'Internal Server Error' })
   }
 })

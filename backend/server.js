@@ -8,6 +8,7 @@ import { getDb } from './config/database.js'
 import webhookRouter from './routes/webhooks.js'
 import apiRouter from './routes/api.js'
 import confirmRouter from './routes/confirm.js'
+import recoveryRouter from './routes/recovery.js'
 
 dotenv.config()
 
@@ -41,6 +42,7 @@ getDb()
 app.use('/webhooks', webhookRouter)
 app.use('/api', apiRouter)
 app.use('/confirm', confirmRouter)
+app.use('/', recoveryRouter)
 
 // Serve Static React assets in production
 const frontendDistPath = path.resolve(__dirname, '../frontend/dist')
@@ -48,7 +50,13 @@ app.use(express.static(frontendDistPath))
 
 // Fallback to index.html for React SPA Router
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/webhooks') || req.path.startsWith('/confirm')) {
+  if (
+    req.path.startsWith('/api') || 
+    req.path.startsWith('/webhooks') || 
+    req.path.startsWith('/confirm') ||
+    req.path.startsWith('/recover-checkout') ||
+    req.path.startsWith('/pay-draft')
+  ) {
     return next()
   }
   res.sendFile(path.join(frontendDistPath, 'index.html'), (err) => {

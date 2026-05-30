@@ -89,6 +89,8 @@ export async function getDb() {
         whatsapp_api_token TEXT,
         whatsapp_instance_id TEXT,
         whatsapp_template TEXT,
+        whatsapp_template_abandoned TEXT,
+        whatsapp_template_draft TEXT,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -102,6 +104,37 @@ export async function getDb() {
         currency TEXT,
         payment_gateway TEXT,
         status TEXT DEFAULT 'pending',
+        whatsapp_status TEXT DEFAULT 'pending',
+        token TEXT UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS abandoned_checkouts (
+        id TEXT PRIMARY KEY,
+        shopify_checkout_id TEXT UNIQUE,
+        customer_name TEXT,
+        customer_phone TEXT,
+        total_price TEXT,
+        currency TEXT,
+        abandoned_checkout_url TEXT,
+        status TEXT DEFAULT 'pending',
+        whatsapp_status TEXT DEFAULT 'pending',
+        token TEXT UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS draft_orders (
+        id TEXT PRIMARY KEY,
+        shopify_draft_order_id TEXT UNIQUE,
+        draft_order_number TEXT,
+        customer_name TEXT,
+        customer_phone TEXT,
+        total_price TEXT,
+        currency TEXT,
+        invoice_url TEXT,
+        status TEXT DEFAULT 'open',
         whatsapp_status TEXT DEFAULT 'pending',
         token TEXT UNIQUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -138,6 +171,8 @@ export async function getDb() {
         whatsapp_api_token TEXT,
         whatsapp_instance_id TEXT,
         whatsapp_template TEXT,
+        whatsapp_template_abandoned TEXT,
+        whatsapp_template_draft TEXT,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -151,6 +186,37 @@ export async function getDb() {
         currency TEXT,
         payment_gateway TEXT,
         status TEXT DEFAULT 'pending',
+        whatsapp_status TEXT DEFAULT 'pending',
+        token TEXT UNIQUE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS abandoned_checkouts (
+        id TEXT PRIMARY KEY,
+        shopify_checkout_id TEXT UNIQUE,
+        customer_name TEXT,
+        customer_phone TEXT,
+        total_price TEXT,
+        currency TEXT,
+        abandoned_checkout_url TEXT,
+        status TEXT DEFAULT 'pending',
+        whatsapp_status TEXT DEFAULT 'pending',
+        token TEXT UNIQUE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS draft_orders (
+        id TEXT PRIMARY KEY,
+        shopify_draft_order_id TEXT UNIQUE,
+        draft_order_number TEXT,
+        customer_name TEXT,
+        customer_phone TEXT,
+        total_price TEXT,
+        currency TEXT,
+        invoice_url TEXT,
+        status TEXT DEFAULT 'open',
         whatsapp_status TEXT DEFAULT 'pending',
         token TEXT UNIQUE,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -172,15 +238,40 @@ export async function getDb() {
   } catch (err) {
     // Colonna già esistente, errore ignorato in sicurezza
   }
+  try {
+    await dbInstance.exec('ALTER TABLE settings ADD COLUMN whatsapp_template_abandoned TEXT')
+  } catch (err) {
+    // Colonna già esistente, errore ignorato in sicurezza
+  }
+  try {
+    await dbInstance.exec('ALTER TABLE settings ADD COLUMN whatsapp_template_draft TEXT')
+  } catch (err) {
+    // Colonna già esistente, errore ignorato in sicurezza
+  }
 
   // Popolamento configurazioni predefinite
   const settingsCount = await dbInstance.get('SELECT COUNT(*) as count FROM settings')
   if (settingsCount.count === 0) {
     const defaultTemplate = 'Ciao {customer_name}, grazie per il tuo ordine #{order_number} di {order_total}. Clicca qui per confermare il tuo indirizzo e la spedizione: {confirm_link}'
+    const defaultAbandonedTemplate = 'Ciao {customer_name}! Abbiamo notato che hai lasciato alcuni articoli nel tuo carrello. Se vuoi completare l\'acquisto, clicca qui: {recovery_link}'
+    const defaultDraftTemplate = 'Ciao {customer_name}, ecco il link per completare il pagamento del tuo ordine di {order_total}: {invoice_link}'
     await dbInstance.run(
-      'INSERT INTO settings (whatsapp_provider, whatsapp_template) VALUES (?, ?)',
-      ['manual', defaultTemplate]
+      'INSERT INTO settings (whatsapp_provider, whatsapp_template, whatsapp_template_abandoned, whatsapp_template_draft) VALUES (?, ?, ?, ?)',
+      ['manual', defaultTemplate, defaultAbandonedTemplate, defaultDraftTemplate]
     )
+  } else {
+    // Se la riga esiste già, aggiorniamo i template se sono vuoti/nulli
+    const existing = await dbInstance.get('SELECT whatsapp_template_abandoned, whatsapp_template_draft FROM settings ORDER BY id DESC LIMIT 1')
+    if (existing && (!existing.whatsapp_template_abandoned || !existing.whatsapp_template_draft)) {
+      const defaultAbandonedTemplate = 'Ciao {customer_name}! Abbiamo notato che hai lasciato alcuni articoli nel tuo carrello. Se vuoi completare l\'acquisto, clicca qui: {recovery_link}'
+      const defaultDraftTemplate = 'Ciao {customer_name}, ecco il link per completare il pagamento del tuo ordine di {order_total}: {invoice_link}'
+      await dbInstance.run(
+        `UPDATE settings SET 
+          whatsapp_template_abandoned = COALESCE(whatsapp_template_abandoned, ?),
+          whatsapp_template_draft = COALESCE(whatsapp_template_draft, ?)`
+        , [defaultAbandonedTemplate, defaultDraftTemplate]
+      )
+    }
   }
 
   return dbInstance
