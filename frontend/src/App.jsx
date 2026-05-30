@@ -481,13 +481,8 @@ function App() {
         .replace(/{invoice_link}/g, invoiceLink)
     }
 
-    // Rileva se l'utente è su un dispositivo mobile
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-    const baseUrl = isMobile 
-      ? 'https://api.whatsapp.com/send' 
-      : 'https://web.whatsapp.com/send'
-
-    return `${baseUrl}?phone=${phone}&text=${encodeURIComponent(text)}`
+    // Utilizziamo il formato universale wa.me che è più stabile ed evita la perdita del messaggio su Desktop
+    return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
   }
 
   // Helper for template preview
@@ -769,15 +764,21 @@ function App() {
                             <div className="actions-cell" style={{ justifyContent: 'flex-end' }}>
                               {/* Action: Send Manual/Automatic WhatsApp */}
                               {settings.whatsapp_provider === 'manual' ? (
-                                <a 
-                                  href={getManualWhatsAppLink(order)} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="btn btn-secondary btn-icon-only"
-                                  title="Invia WhatsApp Manuale (wa.me)"
-                                >
-                                  <Smartphone size={15} style={{ color: '#25D366' }} />
-                                </a>
+                                order.customer_phone === 'Nessun numero' ? (
+                                  <button className="btn btn-secondary btn-icon-only" disabled title="Nessun numero di telefono">
+                                    <Smartphone size={15} style={{ color: 'var(--text-muted)' }} />
+                                  </button>
+                                ) : (
+                                  <a 
+                                    href={getManualWhatsAppLink(order)} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="btn btn-secondary btn-icon-only"
+                                    title="Invia WhatsApp Manuale (wa.me)"
+                                  >
+                                    <Smartphone size={15} style={{ color: '#25D366' }} />
+                                  </a>
+                                )
                               ) : (
                                 <>
                                   <button
@@ -995,15 +996,21 @@ function App() {
                             <div className="actions-cell" style={{ justifyContent: 'flex-end' }}>
                               {/* Send Manual/Automatic WhatsApp */}
                               {settings.whatsapp_provider === 'manual' ? (
-                                <a 
-                                  href={getManualWhatsAppLink(checkout, 'abandoned')} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="btn btn-secondary btn-icon-only"
-                                  title="Invia WhatsApp Manuale (web/app)"
-                                >
-                                  <Smartphone size={15} style={{ color: '#25D366' }} />
-                                </a>
+                                checkout.customer_phone === 'Nessun numero' ? (
+                                  <button className="btn btn-secondary btn-icon-only" disabled title="Nessun numero di telefono">
+                                    <Smartphone size={15} style={{ color: 'var(--text-muted)' }} />
+                                  </button>
+                                ) : (
+                                  <a 
+                                    href={getManualWhatsAppLink(checkout, 'abandoned')} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="btn btn-secondary btn-icon-only"
+                                    title="Invia WhatsApp Manuale (wa.me)"
+                                  >
+                                    <Smartphone size={15} style={{ color: '#25D366' }} />
+                                  </a>
+                                )
                               ) : (
                                 <>
                                   <button
@@ -1209,15 +1216,21 @@ function App() {
                             <div className="actions-cell" style={{ justifyContent: 'flex-end' }}>
                               {/* Send Manual/Automatic WhatsApp */}
                               {settings.whatsapp_provider === 'manual' ? (
-                                <a 
-                                  href={getManualWhatsAppLink(draft, 'draft')} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="btn btn-secondary btn-icon-only"
-                                  title="Invia WhatsApp Manuale (web/app)"
-                                >
-                                  <Smartphone size={15} style={{ color: '#25D366' }} />
-                                </a>
+                                draft.customer_phone === 'Nessun numero' ? (
+                                  <button className="btn btn-secondary btn-icon-only" disabled title="Nessun numero di telefono">
+                                    <Smartphone size={15} style={{ color: 'var(--text-muted)' }} />
+                                  </button>
+                                ) : (
+                                  <a 
+                                    href={getManualWhatsAppLink(draft, 'draft')} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="btn btn-secondary btn-icon-only"
+                                    title="Invia WhatsApp Manuale (wa.me)"
+                                  >
+                                    <Smartphone size={15} style={{ color: '#25D366' }} />
+                                  </a>
+                                )
                               ) : (
                                 <>
                                   <button

@@ -740,7 +740,7 @@ router.post('/shopify/sync-abandoned', async (req, res) => {
   }
 })
 
-// 9. Sync Draft Orders from Shopify via REST
+// 9. Sync Draft Orders from Shopify via GraphQL
 router.post('/shopify/sync-drafts', async (req, res) => {
   try {
     const db = await getDb()
@@ -753,35 +753,79 @@ router.post('/shopify/sync-drafts', async (req, res) => {
     const shop = settings.shopify_store_url.replace(/^https?:\/\//, '').replace(/\/$/, '').trim()
     const accessToken = settings.shopify_access_token.trim()
     
-    const shopifyUrl = `https://${shop}/admin/api/2024-04/draft_orders.json?limit=50&status=any`
+    const shopifyUrl = `https://${shop}/admin/api/2024-04/graphql.json`
+    
+    const graphqlQuery = `
+      query DraftOrders {
+        draftOrders(first: 50) {
+          nodes {
+            id
+            name
+            status
+            invoiceUrl
+            createdAt
+            totalPriceSet {
+              shopMoney {
+                amount
+                currencyCode
+              }
+            }
+            customer {
+              firstName
+              lastName
+              phone
+              email
+            }
+            shippingAddress {
+              firstName
+              lastName
+              phone
+            }
+            billingAddress {
+              phone
+            }
+          }
+        }
+      }
+    `
+
     const response = await fetch(shopifyUrl, {
-      method: 'GET',
+      method: 'POST',
       headers: {
         'X-Shopify-Access-Token': accessToken,
         'Content-Type': 'application/json'
-      }
+      },
+      body: JSON.stringify({ query: graphqlQuery })
     })
 
     if (!response.ok) {
       const errText = await response.text()
-      throw new Error(`Errore API Shopify REST Drafts: ${response.status} - ${errText}`)
+      throw new Error(`Errore API Shopify GraphQL Drafts: ${response.status} - ${errText}`)
     }
 
-    const data = await response.json()
-    const drafts = data.draft_orders || []
+    const resJson = await response.json()
+    if (resJson.errors) {
+      throw new Error(`Errore GraphQL Drafts: ${JSON.stringify(resJson.errors)}`)
+    }
+
+    const nodes = resJson.data?.draftOrders?.nodes || []
     let importedCount = 0
     let updatedCount = 0
 
-    for (const draft of drafts) {
-      const customer = draft.customer
-      const customerName = customer 
-        ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
-        : 'Cliente Shopify'
+    for (const node of nodes) {
+      const customer = node.customer
+      const shippingAddress = node.shippingAddress
+      const billingAddress = node.billingAddress
 
-      const rawPhone = draft.phone || 
-                       customer?.phone || 
-                       draft.shipping_address?.phone || 
-                       draft.billing_address?.phone || 
+      const customerName = customer 
+        ? `${customer.firstName || ''} ${customer.lastName || ''}`.trim()
+        : (shippingAddress 
+            ? `${shippingAddress.firstName || ''} ${shippingAddress.lastName || ''}`.trim()
+            : 'Cliente Shopify')
+
+      const rawPhone = customer?.phone || 
+                       shippingAddress?.phone || 
+                       billingAddress?.phone || 
                        null
 
       let cleanPhone = 'Nessun numero'
@@ -792,13 +836,17 @@ router.post('/shopify/sync-drafts', async (req, res) => {
         }
       }
 
-      const existing = await db.get('SELECT status, token FROM draft_orders WHERE shopify_draft_order_id = ?', [draft.id.toString()])
+      const totalPrice = node.totalPriceSet?.shopMoney?.amount || '0.00'
+      const currency = node.totalPriceSet?.shopMoney?.currencyCode || 'EUR'
+
+      const existing = await db.get('SELECT status, token FROM draft_orders WHERE shopify_draft_order_id = ? OR shopify_draft_order_id = ?', [node.id, node.id.split('/').pop()])
       const token = existing ? existing.token : crypto.randomUUID()
       
       let status = 'open'
-      if (draft.status === 'completed' || draft.order_id !== null) {
+      const gqlStatus = node.status ? node.status.toLowerCase() : 'open'
+      if (gqlStatus === 'completed') {
         status = 'completed'
-      } else if (draft.status === 'invoice_sent') {
+      } else if (gqlStatus === 'invoice_sent') {
         status = 'invoice_sent'
       }
 
@@ -813,18 +861,18 @@ router.post('/shopify/sync-drafts', async (req, res) => {
            status = CASE WHEN draft_orders.status = 'completed' THEN 'completed' ELSE excluded.status END,
            updated_at = CURRENT_TIMESTAMP`,
         [
-          draft.id.toString(),
-          draft.id.toString(),
-          draft.name.toString(),
+          node.id,
+          node.id,
+          node.name.toString(),
           customerName,
           cleanPhone,
-          draft.total_price,
-          draft.currency,
-          draft.invoice_url,
+          totalPrice,
+          currency,
+          node.invoiceUrl,
           status,
           existing ? (existing.whatsapp_status || 'sent') : (rawPhone ? 'pending' : 'failed'),
           token,
-          draft.created_at
+          node.createdAt
         ]
       )
 
