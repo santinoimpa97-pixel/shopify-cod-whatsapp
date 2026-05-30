@@ -184,7 +184,7 @@ router.get('/shopify/auth', async (req, res) => {
 
     const cleanShop = shop.replace(/^https?:\/\//, '').replace(/\/$/, '').trim()
     const redirectUri = `${settings.app_url.trim().replace(/\/$/, '')}/api/shopify/auth/callback`
-    const authorizeUrl = `https://${cleanShop}/admin/oauth/authorize?client_id=${settings.shopify_client_id.trim()}&scope=read_orders,write_orders,read_draft_orders&redirect_uri=${encodeURIComponent(redirectUri)}`
+    const authorizeUrl = `https://${cleanShop}/admin/oauth/authorize?client_id=${settings.shopify_client_id.trim()}&scope=read_orders,write_orders,read_draft_orders,read_customers&redirect_uri=${encodeURIComponent(redirectUri)}`
 
     console.log(`[Shopify Auth] Reindirizzamento a OAuth: ${authorizeUrl}`)
     return res.redirect(authorizeUrl)
