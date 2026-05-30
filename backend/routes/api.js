@@ -632,6 +632,14 @@ router.post('/shopify/sync-abandoned', async (req, res) => {
               phone
               email
             }
+            shippingAddress {
+              firstName
+              lastName
+              phone
+            }
+            billingAddress {
+              phone
+            }
           }
         }
       }
@@ -662,16 +670,26 @@ router.post('/shopify/sync-abandoned', async (req, res) => {
 
     for (const node of nodes) {
       const customer = node.customer
+      const shippingAddress = node.shippingAddress
+      const billingAddress = node.billingAddress
+
       const customerName = customer 
         ? `${customer.firstName || ''} ${customer.lastName || ''}`.trim()
-        : 'Cliente Shopify'
+        : (shippingAddress 
+            ? `${shippingAddress.firstName || ''} ${shippingAddress.lastName || ''}`.trim()
+            : 'Cliente Shopify')
 
-      const rawPhone = customer?.phone || null
-      if (!rawPhone) continue
+      const rawPhone = customer?.phone || 
+                       shippingAddress?.phone || 
+                       billingAddress?.phone || 
+                       null
 
-      let cleanPhone = rawPhone.replace(/[^0-9]/g, '')
-      if (cleanPhone.startsWith('3') && cleanPhone.length === 10) {
-        cleanPhone = '39' + cleanPhone
+      let cleanPhone = 'Nessun numero'
+      if (rawPhone) {
+        cleanPhone = rawPhone.replace(/[^0-9]/g, '')
+        if (cleanPhone.startsWith('3') && cleanPhone.length === 10) {
+          cleanPhone = '39' + cleanPhone
+        }
       }
 
       const totalPrice = node.totalPriceSet?.shopMoney?.amount || '0.00'
@@ -679,7 +697,7 @@ router.post('/shopify/sync-abandoned', async (req, res) => {
 
       const existing = await db.get('SELECT status, token FROM abandoned_checkouts WHERE shopify_checkout_id = ?', [node.id])
       const token = existing ? existing.token : crypto.randomUUID()
-      const status = existing ? existing.status : 'pending'
+      const status = existing ? existing.status : (rawPhone ? 'pending' : 'failed')
 
       await db.run(
         `INSERT INTO abandoned_checkouts (id, shopify_checkout_id, customer_name, customer_phone, total_price, currency, abandoned_checkout_url, status, whatsapp_status, token, created_at)
@@ -699,7 +717,7 @@ router.post('/shopify/sync-abandoned', async (req, res) => {
           currency,
           node.abandonedCheckoutUrl,
           status,
-          existing ? 'sent' : 'pending',
+          existing ? (existing.whatsapp_status || 'sent') : (rawPhone ? 'pending' : 'failed'),
           token,
           node.createdAt
         ]
@@ -766,11 +784,12 @@ router.post('/shopify/sync-drafts', async (req, res) => {
                        draft.billing_address?.phone || 
                        null
 
-      if (!rawPhone) continue
-
-      let cleanPhone = rawPhone.replace(/[^0-9]/g, '')
-      if (cleanPhone.startsWith('3') && cleanPhone.length === 10) {
-        cleanPhone = '39' + cleanPhone
+      let cleanPhone = 'Nessun numero'
+      if (rawPhone) {
+        cleanPhone = rawPhone.replace(/[^0-9]/g, '')
+        if (cleanPhone.startsWith('3') && cleanPhone.length === 10) {
+          cleanPhone = '39' + cleanPhone
+        }
       }
 
       const existing = await db.get('SELECT status, token FROM draft_orders WHERE shopify_draft_order_id = ?', [draft.id.toString()])
@@ -803,7 +822,7 @@ router.post('/shopify/sync-drafts', async (req, res) => {
           draft.currency,
           draft.invoice_url,
           status,
-          existing ? 'sent' : 'pending',
+          existing ? (existing.whatsapp_status || 'sent') : (rawPhone ? 'pending' : 'failed'),
           token,
           draft.created_at
         ]
